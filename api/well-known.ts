@@ -39,7 +39,7 @@ const MANIFEST = {
       },
       market: {
         type: "object",
-        description: "Recent sales activity on OpenSea",
+        description: "Real-time intelligence about the Normies NFT ecosystem on Ethereum. Returns: floor price (live), 24h volume, all-time volume, 24h sales count, unique holders (1,864), circulating supply (8,068), market cap, cheapest floor listings with seller and expiry, total awakened agents (1,087), 8 most recent awakenings with timestamps, total tokens burned (1,932), canvas transforms (896), action points distributed (28,863), canvas paused status, and 5 most recent burn events with wallet addresses and AP earned. Single call. No authentication required.",
       },
     },
   },
