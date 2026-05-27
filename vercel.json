@@ -1,11 +1,11 @@
 {
   "rewrites": [
     {
-      "source": "/.well-known/ai-tool/(.*)",
-      "destination": "/api/handler"
+      "source": "/.well-known/ai-tool/normies-ecosystem-intelligence.json",
+      "destination": "/api/well-known"
     },
     {
-      "source": "/api/(.*)",
+      "source": "/api/tool",
       "destination": "/api/handler"
     }
   ]
