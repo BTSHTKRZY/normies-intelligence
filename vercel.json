@@ -1,17 +1,12 @@
 {
-  "version": 2,
   "rewrites": [
     {
       "source": "/.well-known/ai-tool/(.*)",
-      "destination": "/src/index.ts"
+      "destination": "/api/handler"
     },
     {
       "source": "/api/(.*)",
-      "destination": "/src/index.ts"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/src/index.ts"
+      "destination": "/api/handler"
     }
   ]
 }
