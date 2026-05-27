@@ -8,8 +8,9 @@ const MANIFEST = {
   endpoint: "https://normies-intelligence.vercel.app",
   verifiability: {
     tier: "self-attested",
+    execution: "serverless",
     dataRetention: "none",
-    sourceVisibility: "public",
+    sourceVisibility: "open-source",
     sourceUrl: "https://github.com/BTSHTKRZY/normies-intelligence",
   },
   inputs: {
@@ -42,7 +43,7 @@ const MANIFEST = {
       },
     },
   },
-  creatorAddress: "0x020d6409Ebc4fa13E754e0fEa275ac353eFD4f03",
+  creatorAddress: "0x020d6409ebc4fa13e754e0fea275ac353efd4f03",
 };
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
