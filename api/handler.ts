@@ -1,8 +1,12 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-const NORMIES_API      = "https://api.normies.art";
-const OPENSEA_API      = "https://api.opensea.io/api/v2";
-const NORMIES_SLUG     = "normies";
+const NORMIES_API  = "https://api.normies.art";
+const OPENSEA_API  = "https://api.opensea.io/api/v2";
+const NORMIES_SLUG = "normies";
+const NORMIES_CONTRACT = "0x9Eb6E2025B64f340691e424b7fe7022fFDE12438";
+
+// Total Normies supply — fixed on-chain, 10000 minted minus burned
+const TOTAL_MINTED = 10000;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -21,67 +25,96 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       burnsRes,
       agentsRes,
       osStatsRes,
-      osListingsRes,
-      osOffersRes,
+      osStats7dRes,
+      osStats30dRes,
+      osNFTsRes,
       canvasRes,
     ] = await Promise.allSettled([
 
       // 1. Awakened agent count
-      fetch(`${NORMIES_API}/agents/count`)
-        .then(r => r.json()),
+      fetch(`${NORMIES_API}/agents/count`).then(r => r.json()),
 
       // 2. Canvas global stats
-      fetch(`${NORMIES_API}/history/stats`)
-        .then(r => r.json()),
+      fetch(`${NORMIES_API}/history/stats`).then(r => r.json()),
 
       // 3. Recent burns
-      fetch(`${NORMIES_API}/history/burns?limit=5`)
-        .then(r => r.json()),
+      fetch(`${NORMIES_API}/history/burns?limit=5`).then(r => r.json()),
 
       // 4. Recent awakenings
-      fetch(`${NORMIES_API}/agents/list?limit=8&sort=newest`)
-        .then(r => r.json()),
+      fetch(`${NORMIES_API}/agents/list?limit=8&sort=newest`).then(r => r.json()),
 
-      // 5. OpenSea collection stats — floor, volume, owners, supply
+      // 5. OpenSea collection stats — floor, volume, owners (1 day interval)
       fetch(`${OPENSEA_API}/collections/${NORMIES_SLUG}/stats`, {
-        headers: { "accept": "application/json" },
+        headers: { accept: "application/json" },
       }).then(r => r.json()),
 
-      // 6. OpenSea best listings (floor items)
-      fetch(`${OPENSEA_API}/listings/collection/${NORMIES_SLUG}/best?limit=5`, {
-        headers: { "accept": "application/json" },
+      // 6. OpenSea 7 day stats
+      fetch(`${OPENSEA_API}/collections/${NORMIES_SLUG}/stats?interval=7d`, {
+        headers: { accept: "application/json" },
       }).then(r => r.json()),
 
-      // 7. OpenSea best offers on collection
-      fetch(`${OPENSEA_API}/offers/collection/${NORMIES_SLUG}/best?limit=5`, {
-        headers: { "accept": "application/json" },
+      // 7. OpenSea 30 day stats
+      fetch(`${OPENSEA_API}/collections/${NORMIES_SLUG}/stats?interval=30d`, {
+        headers: { accept: "application/json" },
       }).then(r => r.json()),
 
-      // 8. Canvas contract status
-      fetch(`${NORMIES_API}/canvas/status`)
-        .then(r => r.json()),
+      // 8. OpenSea collection info — supply and description
+      fetch(`${OPENSEA_API}/collections/${NORMIES_SLUG}`, {
+        headers: { accept: "application/json" },
+      }).then(r => r.json()),
+
+      // 9. Canvas contract status
+      fetch(`${NORMIES_API}/canvas/status`).then(r => r.json()),
     ]);
 
     // ── PARSE ──────────────────────────────────────────────────────────────
 
-    const count     = countRes.status     === "fulfilled" ? countRes.value     : null;
-    const stats     = statsRes.status     === "fulfilled" ? statsRes.value     : null;
-    const burns     = burnsRes.status     === "fulfilled" ? burnsRes.value     : null;
-    const agents    = agentsRes.status    === "fulfilled" ? agentsRes.value    : null;
-    const osStats   = osStatsRes.status   === "fulfilled" ? osStatsRes.value   : null;
-    const osListings = osListingsRes.status === "fulfilled" ? osListingsRes.value : null;
-    const osOffers  = osOffersRes.status  === "fulfilled" ? osOffersRes.value  : null;
-    const canvas    = canvasRes.status    === "fulfilled" ? canvasRes.value    : null;
+    const count    = countRes.status    === "fulfilled" ? countRes.value    : null;
+    const stats    = statsRes.status    === "fulfilled" ? statsRes.value    : null;
+    const burns    = burnsRes.status    === "fulfilled" ? burnsRes.value    : null;
+    const agents   = agentsRes.status   === "fulfilled" ? agentsRes.value   : null;
+    const osStats  = osStatsRes.status  === "fulfilled" ? osStatsRes.value  : null;
+    const osStats7 = osStats7dRes.status  === "fulfilled" ? osStats7dRes.value  : null;
+    const osStats30 = osStats30dRes.status === "fulfilled" ? osStats30dRes.value : null;
+    const osNFTs   = osNFTsRes.status   === "fulfilled" ? osNFTsRes.value   : null;
+    const canvas   = canvasRes.status   === "fulfilled" ? canvasRes.value   : null;
 
-    // OpenSea stats breakdown
-    const total     = osStats?.total      || null;
-    const intervals = osStats?.intervals  || [];
-    const day       = intervals.find((i: any) => i.interval === "one_day")   || null;
-    const week      = intervals.find((i: any) => i.interval === "one_week")  || null;
-    const month     = intervals.find((i: any) => i.interval === "one_month") || null;
+    // OpenSea stats — total and interval breakdowns
+    const total    = osStats?.total     || null;
+    const intervals = osStats?.intervals || [];
+    const day      = intervals.find((i: any) => i.interval === "one_day") || null;
 
     // Floor price
-    const floorPrice = total?.floor_price ?? null;
+    const floorRaw = total?.floor_price ?? null;
+    const floorEth = floorRaw ? parseFloat(floorRaw) : null;
+
+    // Supply — from collection info or fallback calculation
+    const totalSupply = osNFTs?.total_supply
+      ?? (TOTAL_MINTED - (parseInt(stats?.totalBurnedTokens) || 0));
+
+    // Market cap = floor × circulating supply
+    const marketCap = floorEth && totalSupply
+      ? (floorEth * totalSupply).toFixed(0)
+      : null;
+
+    // Volume
+    const vol24h  = day?.volume          ?? total?.one_day_volume  ?? null;
+    const vol7d   = osStats7?.total?.volume  ?? total?.seven_day_volume  ?? null;
+    const vol30d  = osStats30?.total?.volume ?? total?.thirty_day_volume ?? null;
+    const volAll  = total?.volume        ?? null;
+
+    // Sales counts
+    const sales24h  = day?.sales ?? total?.one_day_sales  ?? null;
+    const sales7d   = osStats7?.total?.sales  ?? total?.seven_day_sales  ?? null;
+    const sales30d  = osStats30?.total?.sales ?? total?.thirty_day_sales ?? null;
+
+    // Floor change
+    const floorChange24h = day?.floor_price_percentage_change
+      ?? total?.one_day_change
+      ?? null;
+    const floorChange7d  = osStats7?.intervals?.[0]?.floor_price_percentage_change
+      ?? total?.seven_day_change
+      ?? null;
 
     // Recent awakenings
     const agentItems   = agents?.items || [];
@@ -109,89 +142,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : null,
     }));
 
-    // Floor listings (cheapest available)
-    const listingItems = osListings?.listings || [];
-    const floorListings = listingItems.slice(0, 5).map((l: any) => {
-      const priceEth = l.price?.current?.value
-        ? (parseInt(l.price.current.value) / 1e18).toFixed(4)
-        : null;
-      return {
-        token:   `Normie #${l.protocol_data?.parameters?.offer?.[0]?.identifierOrCriteria || "?"}`,
-        price:   priceEth ? `${priceEth} ETH` : null,
-        seller:  l.protocol_data?.parameters?.offerer
-          ? `${l.protocol_data.parameters.offerer.slice(0, 6)}...${l.protocol_data.parameters.offerer.slice(-4)}`
-          : "unknown",
-        expires: l.protocol_data?.parameters?.endTime
-          ? new Date(parseInt(l.protocol_data.parameters.endTime) * 1000).toISOString()
-          : null,
-      };
-    });
-
-    // Top offers/bids
-    const offerItems = osOffers?.offers || [];
-    const topBids    = offerItems.slice(0, 5).map((o: any) => {
-      const priceEth = o.price?.value
-        ? (parseInt(o.price.value) / 1e18).toFixed(4)
-        : null;
-      return {
-        price:   priceEth ? `${priceEth} ETH` : null,
-        bidder:  o.protocol_data?.parameters?.offerer
-          ? `${o.protocol_data.parameters.offerer.slice(0, 6)}...${o.protocol_data.parameters.offerer.slice(-4)}`
-          : "unknown",
-      };
-    });
-
     // ── RESPONSE ──────────────────────────────────────────────────────────
 
     return res.status(200).json({
       snapshot_ts: Date.now(),
 
       collection: {
-        // Floor and market
-        floor_price:      floorPrice
-          ? `${parseFloat(floorPrice).toFixed(4)} ETH`
+        floor_price:      floorEth
+          ? `${floorEth.toFixed(4)} ETH`
+          : null,
+        floor_change_24h: floorChange24h !== null
+          ? `${parseFloat(floorChange24h).toFixed(1)}%`
+          : null,
+        floor_change_7d:  floorChange7d !== null
+          ? `${parseFloat(floorChange7d).toFixed(1)}%`
           : null,
 
-        // Volume by period
-        volume_24h:       day?.volume
-          ? `${parseFloat(day.volume).toFixed(2)} ETH`
+        volume_24h:       vol24h !== null
+          ? `${parseFloat(vol24h).toFixed(2)} ETH`
           : null,
-        volume_7d:        week?.volume
-          ? `${parseFloat(week.volume).toFixed(2)} ETH`
+        volume_7d:        vol7d !== null
+          ? `${parseFloat(vol7d).toFixed(2)} ETH`
           : null,
-        volume_30d:       month?.volume
-          ? `${parseFloat(month.volume).toFixed(2)} ETH`
+        volume_30d:       vol30d !== null
+          ? `${parseFloat(vol30d).toFixed(2)} ETH`
           : null,
-        volume_all_time:  total?.volume
-          ? `${parseFloat(total.volume).toFixed(0)} ETH`
-          : null,
-
-        // Sales count by period
-        sales_24h:        day?.sales    ?? null,
-        sales_7d:         week?.sales   ?? null,
-        sales_30d:        month?.sales  ?? null,
-
-        // Floor change by period
-        floor_change_24h: day?.floor_price_percentage_change
-          ? `${parseFloat(day.floor_price_percentage_change).toFixed(1)}%`
-          : null,
-        floor_change_7d:  week?.floor_price_percentage_change
-          ? `${parseFloat(week.floor_price_percentage_change).toFixed(1)}%`
+        volume_all_time:  volAll !== null
+          ? `${parseFloat(volAll).toFixed(0)} ETH`
           : null,
 
-        // Holders and supply
-        unique_holders:   total?.num_owners    ?? null,
-        supply:           total?.total_supply  ?? null,
-        market_cap:       total?.market_cap
-          ? `${parseFloat(total.market_cap).toFixed(0)} ETH`
-          : null,
+        sales_24h:        sales24h ?? null,
+        sales_7d:         sales7d  ?? null,
+        sales_30d:        sales30d ?? null,
 
-        // Floor listings available now
-        floor_listings:   floorListings,
+        unique_holders:   total?.num_owners   ?? null,
+        supply:           totalSupply          ?? null,
+        market_cap:       marketCap
+          ? `${marketCap} ETH`
+          : null,
       },
 
       agents: {
-        total_awakened:    count?.count || null,
+        total_awakened:    count?.count   || null,
         recent_awakenings: recentAgents,
       },
 
@@ -205,7 +197,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
 
       market: {
-        top_bids: topBids,
+        // Note: OpenSea listings/offers endpoints require API key for live data
+        // Top bid from collection stats
+        top_bid: total?.floor_price
+          ? null  // OpenSea doesn't return top bid in public stats
+          : null,
       },
     });
 
