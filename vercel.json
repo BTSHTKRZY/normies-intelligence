@@ -1,19 +1,17 @@
 {
   "version": 2,
-  "builds": [
+  "rewrites": [
     {
-      "src": "src/index.ts",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/.well-known/ai-tool/(.*)",
-      "dest": "src/index.ts"
+      "source": "/.well-known/ai-tool/(.*)",
+      "destination": "/src/index.ts"
     },
     {
-      "src": "/api/(.*)",
-      "dest": "src/index.ts"
+      "source": "/api/(.*)",
+      "destination": "/src/index.ts"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/src/index.ts"
     }
   ]
 }
