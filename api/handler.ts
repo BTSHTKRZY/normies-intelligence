@@ -1,11 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-const NORMIES_CONTRACT = "0x9Eb6E2025B64f340691e424b7fe7022fFDE12438";
 const NORMIES_API      = "https://api.normies.art";
-const RESERVOIR        = "https://api.reservoir.tools";
-
-// Reservoir works without a key for basic endpoints — use empty string
-const RES_HEADERS = { "accept": "application/json" };
+const OPENSEA_API      = "https://api.opensea.io/api/v2";
+const NORMIES_SLUG     = "normies";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -23,22 +20,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       statsRes,
       burnsRes,
       agentsRes,
-      collectionRes,
-      salesRes,
-      bidsRes,
-      holdersRes,
+      osStatsRes,
+      osListingsRes,
+      osOffersRes,
       canvasRes,
     ] = await Promise.allSettled([
 
-      // 1. Total awakened agent count
+      // 1. Awakened agent count
       fetch(`${NORMIES_API}/agents/count`)
         .then(r => r.json()),
 
-      // 2. Canvas global stats — burns, transforms, AP
+      // 2. Canvas global stats
       fetch(`${NORMIES_API}/history/stats`)
         .then(r => r.json()),
 
-      // 3. Recent burn events with wallet addresses
+      // 3. Recent burns
       fetch(`${NORMIES_API}/history/burns?limit=5`)
         .then(r => r.json()),
 
@@ -46,31 +42,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       fetch(`${NORMIES_API}/agents/list?limit=8&sort=newest`)
         .then(r => r.json()),
 
-      // 5. Collection stats from Reservoir — floor, volume, supply, owners
-      fetch(
-        `${RESERVOIR}/collections/v7?id=${NORMIES_CONTRACT}&includeTopBid=true`,
-        { headers: RES_HEADERS }
-      ).then(r => r.json()),
+      // 5. OpenSea collection stats — floor, volume, owners, supply
+      fetch(`${OPENSEA_API}/collections/${NORMIES_SLUG}/stats`, {
+        headers: { "accept": "application/json" },
+      }).then(r => r.json()),
 
-      // 6. Recent sales
-      fetch(
-        `${RESERVOIR}/sales/v6?collection=${NORMIES_CONTRACT}&limit=8&sortBy=time`,
-        { headers: RES_HEADERS }
-      ).then(r => r.json()),
+      // 6. OpenSea best listings (floor items)
+      fetch(`${OPENSEA_API}/listings/collection/${NORMIES_SLUG}/best?limit=5`, {
+        headers: { "accept": "application/json" },
+      }).then(r => r.json()),
 
-      // 7. Top bids (offers) on the collection
-      fetch(
-        `${RESERVOIR}/orders/bids/v6?collection=${NORMIES_CONTRACT}&limit=5&sortBy=price&status=active`,
-        { headers: RES_HEADERS }
-      ).then(r => r.json()),
+      // 7. OpenSea best offers on collection
+      fetch(`${OPENSEA_API}/offers/collection/${NORMIES_SLUG}/best?limit=5`, {
+        headers: { "accept": "application/json" },
+      }).then(r => r.json()),
 
-      // 8. Holder distribution from Reservoir
-      fetch(
-        `${RESERVOIR}/collections/${NORMIES_CONTRACT}/owners/distribution/v1`,
-        { headers: RES_HEADERS }
-      ).then(r => r.json()),
-
-      // 9. Canvas contract status
+      // 8. Canvas contract status
       fetch(`${NORMIES_API}/canvas/status`)
         .then(r => r.json()),
     ]);
@@ -81,31 +68,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const stats     = statsRes.status     === "fulfilled" ? statsRes.value     : null;
     const burns     = burnsRes.status     === "fulfilled" ? burnsRes.value     : null;
     const agents    = agentsRes.status    === "fulfilled" ? agentsRes.value    : null;
-    const col       = collectionRes.status === "fulfilled"
-      ? collectionRes.value?.collections?.[0]
-      : null;
-    const sales     = salesRes.status     === "fulfilled" ? salesRes.value     : null;
-    const bids      = bidsRes.status      === "fulfilled" ? bidsRes.value      : null;
-    const holders   = holdersRes.status   === "fulfilled" ? holdersRes.value   : null;
+    const osStats   = osStatsRes.status   === "fulfilled" ? osStatsRes.value   : null;
+    const osListings = osListingsRes.status === "fulfilled" ? osListingsRes.value : null;
+    const osOffers  = osOffersRes.status  === "fulfilled" ? osOffersRes.value  : null;
     const canvas    = canvasRes.status    === "fulfilled" ? canvasRes.value    : null;
 
-    // Collection market data
-    const floorPrice  = col?.floorAsk?.price?.amount?.decimal;
-    const topBidPrice = col?.topBid?.price?.amount?.decimal;
-    const volume24h   = col?.volume?.["1day"];
-    const volume7d    = col?.volume?.["7day"];
-    const volumeAll   = col?.volume?.["allTime"];
-    const supply      = col?.tokenCount;
-    const ownerCount  = col?.ownerCount;
-    const marketCap   = col?.marketCap;
+    // OpenSea stats breakdown
+    const total     = osStats?.total      || null;
+    const intervals = osStats?.intervals  || [];
+    const day       = intervals.find((i: any) => i.interval === "one_day")   || null;
+    const week      = intervals.find((i: any) => i.interval === "one_week")  || null;
+    const month     = intervals.find((i: any) => i.interval === "one_month") || null;
 
-    // Price change
-    const floorChange24h = col?.floorSaleChange?.["1day"];
-    const floorChange7d  = col?.floorSaleChange?.["7day"];
+    // Floor price
+    const floorPrice = total?.floor_price ?? null;
 
     // Recent awakenings
-    const agentItems    = agents?.items || [];
-    const recentAgents  = agentItems.slice(0, 8).map((a: any) => ({
+    const agentItems   = agents?.items || [];
+    const recentAgents = agentItems.slice(0, 8).map((a: any) => ({
       name:         a.name || `Agent #${a.tokenId}`,
       id:           parseInt(a.tokenId) || 0,
       type:         a.type || "Human",
@@ -114,51 +94,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : null,
     }));
 
-    // Recent sales
-    const saleList   = sales?.sales || [];
-    const recentSales = saleList.slice(0, 8).map((s: any) => ({
-      token:  s.token?.name || `Normie #${s.token?.tokenId}`,
-      price:  s.price?.amount?.decimal
-        ? `${parseFloat(s.price.amount.decimal).toFixed(4)} ETH`
-        : null,
-      from:   s.from
-        ? `${s.from.slice(0, 6)}...${s.from.slice(-4)}`
-        : "unknown",
-      to:     s.to
-        ? `${s.to.slice(0, 6)}...${s.to.slice(-4)}`
-        : "unknown",
-      ts:     s.timestamp ? s.timestamp * 1000 : null,
-      txHash: s.txHash || null,
-    }));
-
-    // Top bids / offers
-    const bidList  = bids?.orders || [];
-    const topBids  = bidList.slice(0, 5).map((b: any) => ({
-      price:   b.price?.amount?.decimal
-        ? `${parseFloat(b.price.amount.decimal).toFixed(4)} ETH`
-        : null,
-      bidder:  b.maker
-        ? `${b.maker.slice(0, 6)}...${b.maker.slice(-4)}`
-        : "unknown",
-      expires: b.expiration
-        ? new Date(b.expiration * 1000).toISOString()
-        : null,
-    }));
-
-    // Holder distribution
-    const distData      = holders?.ownershipDistribution || null;
-    const holderBuckets = distData
-      ? Object.entries(distData).map(([range, count]) => ({
-          range,
-          holders: count,
-        }))
-      : null;
-
     // Recent burns
     const burnList    = Array.isArray(burns) ? burns : [];
     const recentBurns = burnList.slice(0, 5).map((b: any) => ({
-      commitId:    b.commitId,
-      owner:       b.owner
+      commitId:      b.commitId,
+      owner:         b.owner
         ? `${b.owner.slice(0, 6)}...${b.owner.slice(-4)}`
         : "unknown",
       receiverToken: b.receiverTokenId,
@@ -169,38 +109,85 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : null,
     }));
 
+    // Floor listings (cheapest available)
+    const listingItems = osListings?.listings || [];
+    const floorListings = listingItems.slice(0, 5).map((l: any) => {
+      const priceEth = l.price?.current?.value
+        ? (parseInt(l.price.current.value) / 1e18).toFixed(4)
+        : null;
+      return {
+        token:   `Normie #${l.protocol_data?.parameters?.offer?.[0]?.identifierOrCriteria || "?"}`,
+        price:   priceEth ? `${priceEth} ETH` : null,
+        seller:  l.protocol_data?.parameters?.offerer
+          ? `${l.protocol_data.parameters.offerer.slice(0, 6)}...${l.protocol_data.parameters.offerer.slice(-4)}`
+          : "unknown",
+        expires: l.protocol_data?.parameters?.endTime
+          ? new Date(parseInt(l.protocol_data.parameters.endTime) * 1000).toISOString()
+          : null,
+      };
+    });
+
+    // Top offers/bids
+    const offerItems = osOffers?.offers || [];
+    const topBids    = offerItems.slice(0, 5).map((o: any) => {
+      const priceEth = o.price?.value
+        ? (parseInt(o.price.value) / 1e18).toFixed(4)
+        : null;
+      return {
+        price:   priceEth ? `${priceEth} ETH` : null,
+        bidder:  o.protocol_data?.parameters?.offerer
+          ? `${o.protocol_data.parameters.offerer.slice(0, 6)}...${o.protocol_data.parameters.offerer.slice(-4)}`
+          : "unknown",
+      };
+    });
+
     // ── RESPONSE ──────────────────────────────────────────────────────────
 
     return res.status(200).json({
       snapshot_ts: Date.now(),
 
       collection: {
+        // Floor and market
         floor_price:      floorPrice
           ? `${parseFloat(floorPrice).toFixed(4)} ETH`
           : null,
-        floor_change_24h: floorChange24h
-          ? `${(floorChange24h * 100).toFixed(1)}%`
+
+        // Volume by period
+        volume_24h:       day?.volume
+          ? `${parseFloat(day.volume).toFixed(2)} ETH`
           : null,
-        floor_change_7d:  floorChange7d
-          ? `${(floorChange7d * 100).toFixed(1)}%`
+        volume_7d:        week?.volume
+          ? `${parseFloat(week.volume).toFixed(2)} ETH`
           : null,
-        top_bid:          topBidPrice
-          ? `${parseFloat(topBidPrice).toFixed(4)} ETH`
+        volume_30d:       month?.volume
+          ? `${parseFloat(month.volume).toFixed(2)} ETH`
           : null,
-        volume_24h:       volume24h
-          ? `${parseFloat(volume24h).toFixed(2)} ETH`
+        volume_all_time:  total?.volume
+          ? `${parseFloat(total.volume).toFixed(0)} ETH`
           : null,
-        volume_7d:        volume7d
-          ? `${parseFloat(volume7d).toFixed(2)} ETH`
+
+        // Sales count by period
+        sales_24h:        day?.sales    ?? null,
+        sales_7d:         week?.sales   ?? null,
+        sales_30d:        month?.sales  ?? null,
+
+        // Floor change by period
+        floor_change_24h: day?.floor_price_percentage_change
+          ? `${parseFloat(day.floor_price_percentage_change).toFixed(1)}%`
           : null,
-        volume_all_time:  volumeAll
-          ? `${parseFloat(volumeAll).toFixed(0)} ETH`
+        floor_change_7d:  week?.floor_price_percentage_change
+          ? `${parseFloat(week.floor_price_percentage_change).toFixed(1)}%`
           : null,
-        market_cap:       marketCap
-          ? `${parseFloat(marketCap).toFixed(0)} ETH`
+
+        // Holders and supply
+        unique_holders:   total?.num_owners    ?? null,
+        supply:           total?.total_supply  ?? null,
+        market_cap:       total?.market_cap
+          ? `${parseFloat(total.market_cap).toFixed(0)} ETH`
           : null,
-        supply:           parseInt(supply)    || null,
-        unique_holders:   parseInt(ownerCount) || null,
+
+        // Floor listings available now
+        floor_listings:   floorListings,
       },
 
       agents: {
@@ -218,9 +205,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
 
       market: {
-        recent_sales:       recentSales,
-        top_bids:           topBids,
-        holder_distribution: holderBuckets,
+        top_bids: topBids,
       },
     });
 
